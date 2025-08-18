@@ -1,1 +1,141 @@
+name: Build
+on:
+  workflow_call:
+    inputs:
+      name:
+        required: true
+        type: string
+      os:
+        required: true
+        type: string
+      cacheName:
+        required: true
+        type: string
+      buildArgs:
+        required: true
+        type: string
+      artifactName:
+        required: true
+        type: string
+      artifactPath:
+        required: true
+        type: string
+  secrets:
+      PSYCH_ONLINE_REPO:
+        required: true
+      PSYCH_ONLINE_TOKEN:
+        required: true
+permissions: write-all
 
+env:
+  HAXE_VERSION: 4.3.7
+  PROJECT_NAME: PsychOnline
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ inputs.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+            repository: ${{  secrets.PSYCH_ONLINE_REPO }}
+            token: ${{ secrets.PSYCH_ONLINE_TOKEN  }}
+
+      - name: Setup Haxe
+        if: inputs.name != 'Linux ARM64'
+        uses: krdlab/setup-haxe@master
+        with:
+          haxe-version: ${{ env.HAXE_VERSION }}
+
+      - name: Setup Haxe (Linux ARM)
+        if: inputs.name == 'Linux ARM64'
+        run: |
+          sudo add-apt-repository ppa:haxe/releases -y
+          sudo apt update
+          sudo apt-get install -y haxe neko
+          haxelib setup ~/haxelib
+
+      - name: Setup Xcode
+        if: inputs.name == 'iOS'
+        uses: maxim-lobanov/setup-xcode@master
+        with:
+          xcode-version: '16.4'
+
+      - name: Restore Cache
+        uses: actions/cache@v4
+        with:
+          key: cache-build-${{ inputs.cacheName }}
+          path: |
+            .haxelib/
+            export/release/${{ inputs.cacheName }}/${{ env.PROJECT_NAME }}/haxe/
+          restore-keys: |
+            cache-build-${{ inputs.cacheName }}
+
+      - name: Install libVLC
+        if: contains(inputs.name, 'Linux')
+        run: sudo apt install libvlc-dev libvlccore-dev
+
+      - name: Install Libraries
+        run: |
+          haxelib install hmm --quiet
+          haxelib run hmm install --quiet
+
+      - name: Configure Android
+        if: inputs.name == 'Android'
+        run: |
+          haxelib run lime config ANDROID_SDK $ANDROID_HOME
+          haxelib run lime config ANDROID_NDK_ROOT $ANDROID_NDK_LATEST_HOME
+          haxelib run lime config JAVA_HOME $JAVA_HOME_21_arm64
+          haxelib run lime config ANDROID_SETUP true
+
+      - name: Compile
+        run: haxelib run lime build ${{ inputs.buildArgs }}
+
+      - name: Remove Old Cache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            })
+            for (const cache of caches.data.actions_caches) {
+              if (cache.key == "cache-build-${{ inputs.cacheName }}") {
+                console.log('Clearing ' + cache.key + '...')
+                await github.rest.actions.deleteActionsCacheById({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  cache_id: cache.id,
+                })
+                console.log("Cache cleared.")
+              }
+            }
+
+      - name: Make IPA
+        if: inputs.name == 'iOS'
+        run: |
+          brew install ldid
+          cd export/release/ios/build/Release-iphoneos/${{ env.PROJECT_NAME }}.app
+          ldid -S../../../${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.entitlements ${{ env.PROJECT_NAME }}
+          cd ..
+          mkdir Payload
+          mv ${{ env.PROJECT_NAME }}.app Payload
+          zip -r ${{ env.PROJECT_NAME }}.ipa Payload
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: ${{ inputs.artifactName }}
+          path: ${{ inputs.artifactPath }}
+          if-no-files-found: error
+
+      - name: Upload Cache
+        uses: actions/cache@v4
+        with:
+          key: cache-build-${{ inputs.cacheName }}
+          path: |
+            .haxelib/
+            export/release/${{ inputs.cacheName }}/${{ env.PROJECT_NAME }}/haxe/
+          restore-keys: |
+            cache-build-${{ inputs.cacheName }}
