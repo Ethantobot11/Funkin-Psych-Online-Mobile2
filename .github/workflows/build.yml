@@ -20,7 +20,7 @@ on:
       artifactPath:
         required: true
         type: string
-  secrets:
+    secrets:
       PSYCH_ONLINE_REPO:
         required: true
       PSYCH_ONLINE_TOKEN:
