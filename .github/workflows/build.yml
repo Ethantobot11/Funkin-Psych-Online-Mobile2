@@ -39,7 +39,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-            repository: ${{  secrets.PSYCH_ONLINE_REPO }}
+            repository: ${{ secrets.PSYCH_ONLINE_REPO }}
             token: ${{ secrets.PSYCH_ONLINE_TOKEN  }}
 
       - name: Setup Haxe
